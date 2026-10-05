@@ -1,0 +1,27 @@
+AhaKey ADV
+Unofficial community port for M5Stack Cardputer ADV.
+
+Protocol reference: AhakeyAI/desktop
+https://github.com/AhakeyAI/desktop
+Reference revision: cff64db84d65c23ca2c8970f0c261146394e678e
+
+The following portions were adapted from AhakeyAI/desktop revision
+c518f9f62994d465843d19cf84d782e2d2e04a05, whose repository LICENSE is Apache-2.0:
+
+CH582m_vibe_coding_BLE_keyboard-master/APP/sub_main/pic.h
+  -> include/FactoryFrames.h: original pixel data, losslessly compressed.
+CH582m_vibe_coding_BLE_keyboard-master/APP/sub_main/psk_ws2812.c
+  -> src/OriginalLights.cpp: animation logic adapted to a C++ renderer.
+CH582m_vibe_coding_BLE_keyboard-master/APP/sub_main/main.c
+  -> include/OriginalDefaults.h: default profiles adapted to this port.
+
+Modified portions have been ported to ESP32-S3, M5Cardputer and the local
+configuration types. The original Apache-2.0 license is included in LICENSE.
+The upstream revision has no separate NOTICE file.
+
+M5Stack libraries, Arduino-ESP32, ESP-IDF, Python dependencies, speech models
+and optional audio drivers remain subject to their respective licenses.
+Their runtimes, model weights and driver installers are not bundled here.
+
+Names identify interoperability and target hardware. This project is not
+an official AhaKey, M5Stack or OpenAI release; no trademark rights are granted.
