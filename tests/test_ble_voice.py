@@ -137,6 +137,16 @@ class TransportTests(unittest.TestCase):
                 return
         self.fail('Timed out waiting for fake BLE state')
 
+    def read_data(self, transport, timeout=2):
+        # Generation changes intentionally wake read() with no payload. Wait
+        # for the scheduled callback rather than assuming one read receives it.
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            data = transport.read(4096)
+            if data:
+                return data
+        self.fail('Timed out waiting for fake BLE audio')
+
     def test_actual_worker_fragmented_audio_heartbeat_and_clean_exit(self):
         f = Factory()
         with self.transport(f) as t:
@@ -165,8 +175,9 @@ class TransportTests(unittest.TestCase):
             c = f.clients[0]
             d = Decoder()
             old_callback = c.callback
-            t._loop.call_soon_threadsafe(c.callback, AUDIO, frame(1, 0) + frame(2, 1, b'a'*320))
-            chunk = t.read(4096)
+            t._loop.call_soon_threadsafe(t._loop.call_later, .02, c.callback, AUDIO,
+                                        frame(1, 0) + frame(2, 1, b'a'*320))
+            chunk = self.read_data(t)
             generation = t.generation
             d.feed(chunk)
             self.assertIsNotNone(d.session)
@@ -179,7 +190,7 @@ class TransportTests(unittest.TestCase):
             t._loop.call_soon_threadsafe(old_callback, AUDIO, b'stale link data')
             payload = frame(1, 0, session=9) + frame(2, 1, b'b'*320, session=9) + frame(3, 2, session=9)
             t._loop.call_soon_threadsafe(c2.callback, AUDIO, payload)
-            chunk = t.read(4096)
+            chunk = self.read_data(t)
             if t.generation != generation:
                 d = Decoder()
             self.assertEqual(d.feed(chunk), [b'b'*320])
