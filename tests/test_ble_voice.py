@@ -101,7 +101,7 @@ class FakeClient:
     async def read_gatt_char(self, uuid):
         assert uuid == CONTROL
         return STATUS.pack(b'AVS1', self.token if not self.factory.busy else self.token ^ 1,
-                           self.factory.mtu, int(self.callback is not None))
+                           self.factory.mtu, int(self.callback is not None) | getattr(self.factory, 'flags', 0))
 
     async def start_notify(self, uuid, callback):
         assert uuid == AUDIO
@@ -125,6 +125,23 @@ class Factory:
 
 
 class TransportTests(unittest.TestCase):
+    def test_dashboard_requires_firmware_capability_and_current_lease(self):
+        for capability in (0, 2):
+            with self.subTest(capability=capability):
+                f=Factory();f.flags=capability
+                states=[]
+                with self.transport(f, on_state=lambda **s:states.append(s)) as t:
+                    t.set_dashboard(bytes([2,75,255,1,1,3])+b'ADV')
+                    self.assertTrue(f.ready.wait(2))
+                    self.wait_until(lambda:states, t)
+                    if capability:
+                        self.wait_until(lambda:any(p[:4]==b'AVD1' for p in f.clients[0].writes),t)
+                    else:
+                        self.assertFalse(any(p[:4]==b'AVD1' for p in f.clients[0].writes))
+                    for p in f.clients[0].writes:
+                        if p[:4]==b'AVD1':self.assertEqual(struct.unpack_from('<I',p,4)[0],t._token)
+                self.assertFalse(states[-1]['connected'])
+
     def transport(self, factory, **kwargs):
         return BleTransport('AA:BB:CC:DD:EE:FF', client_factory=factory, retry_delay=.02,
                             log=lambda _: None, **kwargs)

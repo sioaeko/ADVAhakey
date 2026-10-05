@@ -107,7 +107,7 @@ async def find_device(scanner):
 
 class BleTransport:
     def __init__(self, address=None, *, client_factory=None, scanner=None, retry_delay=3,
-                 log=None, buffer_limit=MAX_PENDING):
+                 log=None, buffer_limit=MAX_PENDING, on_state=None):
         self.address = address
         self._factory, self._scanner = client_factory, scanner
         self._retry_delay = retry_delay
@@ -120,6 +120,9 @@ class BleTransport:
         self._error = None
         self._last_poll = time.monotonic()
         self._token = secrets.randbits(32) or 1
+        self._on_state = on_state or (lambda **state: None)
+        self._dashboard = None
+        self._dashboard_lock = threading.Lock()
 
     def __enter__(self):
         if self._factory is None:
@@ -193,7 +196,14 @@ class BleTransport:
         async def heartbeat():
             await client.write_gatt_char(CONTROL, struct.pack('<4sI', b'AVH1', self._token), response=True)
             status = await client.read_gatt_char(CONTROL)
-            return validate_status(status, self._token)
+            mtu = validate_status(status, self._token)
+            flags = STATUS.unpack(status)[3]
+            self._on_state(connected=True, mtu=mtu, dashboard_supported=bool(flags & 2), mic_error=flags >> 8)
+            with self._dashboard_lock:
+                dashboard = self._dashboard
+            if flags & 2 and dashboard is not None:
+                await client.write_gatt_char(CONTROL, struct.pack('<4sI', b'AVD1', self._token) + dashboard, response=True)
+            return mtu
 
         try:
             await asyncio.wait_for(client.connect(), 45)
@@ -226,6 +236,7 @@ class BleTransport:
             raise ConnectionError('ADV disconnected; waiting to reconnect')
         finally:
             active = False
+            self._on_state(connected=False)
             self._buffer.reset()
             if client.is_connected:
                 if owns_lease:
@@ -243,6 +254,12 @@ class BleTransport:
                 await asyncio.wait_for(client.disconnect(), 3)
             except Exception:
                 pass
+
+    def set_dashboard(self, payload):
+        if len(payload) < 6 or len(payload) > 34 or payload[5] != len(payload) - 6:
+            raise ValueError('Invalid dashboard payload')
+        with self._dashboard_lock:
+            self._dashboard = bytes(payload)
 
     def write(self, data):
         if data != b'AHA-MIC\n':

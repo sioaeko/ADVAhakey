@@ -22,6 +22,7 @@
 #include "NetVoice.h"
 #include "BleVoice.h"
 #include "FirmwareVersion.h"
+#include "Dashboard.h"
 
 aha::Config config;
 Preferences prefs;
@@ -174,6 +175,9 @@ void setupBLE(){
 }
 void draw(){
  if(networkUiVisible())return;
+ static bool wasDashboard=false;
+ if(drawDashboard()){wasDashboard=true;return;}
+ if(wasDashboard){M5Cardputer.Display.fillScreen(TFT_BLACK);wasDashboard=false;}
  auto& d=M5Cardputer.Display;
  bool notice=int32_t(modeNoticeUntil-millis())>0;
  static bool wasNotice=false;
@@ -279,7 +283,7 @@ void loop(){
  static uint32_t g0Started=0;
  if(g0Voice){
   if(micActive)g0SawActive=true;
-  if((g0SawActive&&!micActive)||micError==2||micError==3||uint32_t(millis()-g0Started)>=61000)g0Voice=false;
+  if((g0SawActive&&!micActive)||micError>=2||uint32_t(millis()-g0Started)>=61000)g0Voice=false;
  }
  uint8_t previousGate=gate.value();
  if(M5Cardputer.BtnA.wasPressed()){
@@ -332,7 +336,7 @@ void loop(){
  if(pulseDue&&int32_t(millis()-pulseDue)>=0){pulseDue=0;release();}
  if(usbPending&&USB&&usbKeyboard.usb.ready())usbPending=!usbKeyboard.usb.SendReport(1,report,8,10);
  tickMacro();tickLights();
- if(millis()-lastStatus>=1000){status();lastStatus=millis();}
+ if(millis()-lastStatus>=1000){status();lastStatus=millis();dirty=true;}
  auto pic=config.pictures[config.mode];unsigned frames=pic.count?pic.count:config.mode==0?8:config.mode<3?1:0;
  unsigned interval=pic.count?pic.interval:100;
  if(frames>1&&millis()-animationTime>=interval){animationIndex=(animationIndex+1)%frames;animationTime=millis();dirty=true;}

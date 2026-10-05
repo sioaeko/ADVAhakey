@@ -5,6 +5,7 @@
 #include "NetVoice.h"
 #include "BleVoice.h"
 #include "VoiceAdpcm.h"
+#include "VoiceHealth.h"
 static bool wifiSession=false;
 std::atomic<bool> micRequested{false},micActive{false};
 std::atomic<uint32_t> micHeartbeat{0};
@@ -63,7 +64,14 @@ static void voiceTask(void*){
   if(wifiSession&&!startBleVoice()){micError=3;micRequested=false;continue;}
 #endif
   M5Cardputer.Speaker.end();
-  if(!M5Cardputer.Mic.begin()){micError=2;micRequested=false;continue;}
+  // Recover initialization before START, never splice a restart into a take.
+  bool micStarted=false;
+  for(unsigned attempt=0;attempt<3&&micRequested&&live();attempt++){
+   if(M5Cardputer.Mic.begin()){micStarted=true;break;}
+   M5Cardputer.Mic.end();vTaskDelay(pdMS_TO_TICKS(60));
+  }
+  if(!micStarted){micError=2;micRequested=false;continue;}
+  aha::VoiceHealth health;
   session=esp_random();sequence=0;audioPackets=0;adpcmIndex=0;failureStage=0;micError=0;uint32_t started=millis();
   bool ok=emit(1);micActive=ok;
   if(ok)ok=M5Cardputer.Mic.record(samples[0],CaptureSamples,16000)&&M5Cardputer.Mic.record(samples[1],CaptureSamples,16000);
@@ -79,6 +87,7 @@ static void voiceTask(void*){
    if(wifiSession&&!M5Cardputer.Mic.isRecording()){failureStage=3;ok=false;break;}
 #endif
    auto buf=samples[index];unsigned peak=0;for(unsigned i=0;i<CaptureSamples;i++){unsigned a=abs(int(buf[i]));if(a>peak)peak=a;}micLevel=peak;
+   if(!health.observe(buf,CaptureSamples)){failureStage=9;ok=false;break;}
    ok=emitSamples(buf);
    if(!ok)failureStage=4;
    if(ok){ok=M5Cardputer.Mic.record(buf,CaptureSamples,16000);if(!ok)failureStage=5;}
@@ -97,7 +106,7 @@ static void voiceTask(void*){
   if(wifiSession){bool flushed=finishBleVoice();success=success&&flushed;}
 #endif
   micActive=false;micLevel=0;
-  if(!success){micError=3;if(!failureStage)failureStage=8;}
+  if(!success){micError=failureStage==9?5:3;if(!failureStage)failureStage=8;}
   // Require releasing PTT after timeout/failure; never restart while held.
   while(micRequested)vTaskDelay(pdMS_TO_TICKS(5));
  }

@@ -32,3 +32,4 @@ HANDOFF.md
 REVIEW-*.md
 .DS_Store
 Thumbs.db
+.companion/

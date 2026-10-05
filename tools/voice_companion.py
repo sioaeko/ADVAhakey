@@ -6,7 +6,15 @@ import queue
 import threading
 import time
 import wave
+import json
 from voice_protocol import Decoder
+from companion_state import read_json
+
+_event_lock = threading.Lock()
+
+def event(kind, **fields):
+    with _event_lock:
+        print('AHA-EVENT ' + json.dumps({'kind': kind, **fields}, ensure_ascii=True), flush=True)
 
 def foreground():
     import sys
@@ -70,6 +78,8 @@ def main():
     parser.add_argument('--cpu-threads', type=int, default=8, help='CPU inference threads')
     parser.add_argument('--type', action='store_true', help='Windows: type transcript into the same foreground window; never press Enter')
     parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1] / 'recordings')
+    parser.add_argument('--stop-file', type=Path, help='Manager stop request; unfinished audio is discarded')
+    parser.add_argument('--dashboard-file', type=Path, help='Manager snapshot for BLE device display')
     args = parser.parse_args()
     if args.ble_address and not args.ble:
         parser.error('--ble-address requires --ble')
@@ -78,7 +88,7 @@ def main():
         parser.error('--type currently supports Windows only')
     if args.ble:
         from voice_ble import BleTransport
-        transport=BleTransport(args.ble_address)
+        transport=BleTransport(args.ble_address, on_state=lambda **s: event('connection', **s))
     elif args.wifi:
         from voice_network import WifiTransport,load_token
         token=load_token(args.token_file)
@@ -97,9 +107,11 @@ def main():
         transport.port=args.port
     model = None
     if not args.record_only:
+        event('model', state='loading')
         from faster_whisper import WhisperModel
         print(f'Loading local speech model: {args.model} (CPU int8, {args.cpu_threads} threads)', flush=True)
         model = WhisperModel(args.model, device='cpu', compute_type='int8', cpu_threads=args.cpu_threads)
+        event('model', state='ready')
     args.output.mkdir(parents=True, exist_ok=True)
     jobs = queue.Queue(maxsize=2)
     def worker():
@@ -109,14 +121,17 @@ def main():
                 if item is None:
                     return
                 path, target = item
+                event('speech', state='transcribing')
                 segments, _ = model.transcribe(str(path), language=args.language, vad_filter=True)
                 text = ''.join(part.text for part in segments).strip()
                 path.with_suffix('.txt').write_text(text, encoding='utf-8')
                 print(text or '[No speech detected]', flush=True)
+                event('speech', state='complete', text=text, file=path.name)
                 if args.type:
                     type_windows(text, target)
             except Exception as exc:
                 print(f'Transcription error (WAV preserved): {exc}', flush=True)
+                event('speech', state='error', message='음성 인식에 실패했습니다. 녹음 파일은 보존됐습니다.')
             finally:
                 jobs.task_done()
     thread = threading.Thread(target=worker, daemon=True)
@@ -126,20 +141,26 @@ def main():
         nonlocal target
         target = foreground()
         print('Recording START received', flush=True)
+        event('recording', state='recording')
     def recording_end(pcm):
         if not pcm:
             return
         path = args.output / (datetime.now().strftime('%Y%m%d-%H%M%S-%f')+'.wav')
         save_wav(path, pcm)
+        event('recording', state='saved', seconds=round(len(pcm)/32000, 2), file=path.name)
         print(f'Saved {path.name} ({len(pcm)/32000:.2f}s)', flush=True)
         if model:
             try:
                 jobs.put_nowait((path, target))
             except queue.Full:
                 print('Speech queue full; WAV saved for later.', flush=True)
+                event('speech', state='error', message='인식 대기열이 가득 찼습니다. 녹음 파일은 저장됐습니다.')
+    def rejected():
+        print('Recording rejected: abort, CRC or sequence error', flush=True)
+        event('recording', state='error', message='녹음이 끊겼습니다. G0로 새 녹음을 시작해 주세요.')
     def new_decoder():
         return Decoder(on_start=recording_start, on_end=recording_end,
-                       on_error=lambda: print('Recording rejected: abort, CRC or sequence error', flush=True))
+                       on_error=rejected)
     decoder = new_decoder()
     last_ping = last_data = 0
     received_bytes = 0
@@ -150,11 +171,17 @@ def main():
         with transport as port:
             generation=getattr(port,"generation",0)
             print('Ready. Focus your text field, then tap G0 to start and tap again to finish (Fn+Space remains hold-to-talk).', flush=True)
-            while True:
+            while not (args.stop_file and args.stop_file.exists()):
                 now = time.monotonic()
                 if now-last_ping >= 1:
                     port.write(b'AHA-MIC\n')
                     last_ping = now
+                    if args.dashboard_file and hasattr(port, 'set_dashboard'):
+                        from codex_status import dashboard_payload
+                        snapshot = read_json(args.dashboard_file, max_age=15)
+                        enabled = snapshot.get('device_display', False)
+                        payload = dashboard_payload(snapshot, snapshot.get('selected', 0)) if enabled else bytes([0,255,255,0,0,0])
+                        port.set_dashboard(payload)
                 chunk = port.read(4096)
                 if getattr(port,"generation",0)!=generation:
                     if decoder.session is not None:
@@ -163,6 +190,7 @@ def main():
                     generation=port.generation
                     decoder=new_decoder()
                     target=None
+                    event('recording', state='idle')
                 if chunk:
                     received_bytes += len(chunk)
                     last_data = now
@@ -173,11 +201,13 @@ def main():
                     decoder=new_decoder()
                     target=None
                     print('Incomplete audio discarded: transport timeout', flush=True)
+                    event('recording', state='error', message='음성 전송 시간이 초과됐습니다. 다시 녹음해 주세요.')
     except KeyboardInterrupt:
         print('Stopping. Finishing queued transcripts...', flush=True)
     finally:
         jobs.put(None)
         thread.join()
+        event('receiver', state='stopped')
 
 if __name__ == '__main__':
     main()

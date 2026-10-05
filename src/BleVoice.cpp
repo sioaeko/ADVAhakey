@@ -6,6 +6,8 @@
 #include <BLE2902.h>
 #include <esp_gatt_common_api.h>
 #include <atomic>
+#include "Dashboard.h"
+#include "Voice.h"
 
 // Private service; the existing HID and AhaKey configuration services keep their UUIDs.
 static constexpr const char* serviceUuid="c0a17340-7d8e-4a15-9f4a-2b0c73a10000";
@@ -28,9 +30,14 @@ bool bleVoiceReady(){
 }
 class Control:public BLECharacteristicCallbacks {
  void onWrite(BLECharacteristic* c,esp_ble_gatts_cb_param_t* p) override {
-  auto data=c->getValue();if(data.size()!=8)return;
+  auto data=c->getValue();if(data.size()<8)return;
   uint32_t token;memcpy(&token,data.data()+4,4);if(!token)return;
   bool same=owner==token&&connection==p->write.conn_id;
+  if(!memcmp(data.data(),"AVD1",4)){
+   if(same&&uint32_t(millis()-heartbeat.load())<2500)receiveDashboard((const uint8_t*)data.data()+8,data.size()-8);
+   return;
+  }
+  if(data.size()!=8)return;
   if(!memcmp(data.data(),"AVH0",4)) {if(same){owner=0;faulty=true;epoch++;}return;}
   if(memcmp(data.data(),"AVH1",4))return;
   if(owner&&!same&&uint32_t(millis()-heartbeat.load())<2500)return;
@@ -42,7 +49,7 @@ class Control:public BLECharacteristicCallbacks {
  }
  void onRead(BLECharacteristic* c,esp_ble_gatts_cb_param_t*) override {
   uint8_t value[12];memcpy(value,"AVS1",4);uint32_t token=owner.load();
-  uint16_t negotiated=mtu.load(),flags=bleVoiceReady()?1:0;
+  uint16_t negotiated=mtu.load(),flags=(bleVoiceReady()?1:0)|2|(micError.load()<<8);
   memcpy(value+4,&token,4);memcpy(value+8,&negotiated,2);memcpy(value+10,&flags,2);c->setValue(value,sizeof(value));
  }
 };

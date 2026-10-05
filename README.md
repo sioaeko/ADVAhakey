@@ -4,7 +4,14 @@ M5Stack **Cardputer ADV**를 USB/Bluetooth 키보드, AhaKey 호환 단축키 �
 
 Unofficial Cardputer ADV firmware with USB/BLE keyboard, AhaKey-compatible shortcuts and a Windows speech companion. Bluetooth microphone transport is **experimental**.
 
-> **현재 상태:** 일반 USB/Wi-Fi 빌드는 `1.3.8`, Bluetooth 전용 빌드는 `1.4.2-ble`입니다. BLE 전용 빌드의 부팅·연결·MTU 185·Wi-Fi 비활성화는 기기에서 확인했습니다. 최종 ADPCM 버전의 실제 녹음 완료, 케이블 없는 사용, 녹음 중 동시 타이핑은 아직 검증하지 않았습니다. 완성된 Bluetooth 마이크 제품으로 배포하는 버전이 아닙니다.
+> **현재 소스:** 일반 빌드 `1.5.0`, Bluetooth 전용 빌드 `1.5.0-ble`. Windows 관리 앱, BLE Codex 상태 화면, 마이크 초기화 재시도와 고정 샘플 감지를 추가했습니다. 이전 `1.4.2-ble`에서 부팅·연결·MTU 185·Wi-Fi 비활성화는 확인했지만, 최종 ADPCM 녹음 완료·케이블 없는 사용·동시 타이핑과 새 펌웨어의 실기 동작은 아직 검증하지 않았습니다. BLE 마이크는 실험 기능입니다.
+
+## Windows 관리 앱
+
+`setup-companion.cmd`를 한 번 실행한 뒤 `start-companion.vbs`를 열면 됩니다.
+수신기 시작·중지, 모델 설정, 트레이, Codex 작업 상태와 사용 한도를 한곳에서 확인합니다.
+기존 녹음 모델과 실행기도 유지됩니다. 기기 상태 화면에는 별도로 `1.5.0-ble` 설치가 필요합니다.
+설치·사용법과 상태 표시의 한계는 [COMPANION.md](COMPANION.md)를 참고하세요.
 
 ## 기능과 조작
 
