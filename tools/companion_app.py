@@ -51,6 +51,18 @@ def receiver_command(config, stop_file):
     return command
 
 
+def terminate_receiver(child):
+    if child.poll() is not None:
+        return
+    if os.name == 'nt':
+        # The venv redirector may own a second Python process. Stop only this tree.
+        subprocess.run(['taskkill.exe', '/PID', str(child.pid), '/T', '/F'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       creationflags=subprocess.CREATE_NO_WINDOW, timeout=5, check=False)
+    else:
+        child.terminate()
+
+
 class CompanionApp:
     def __init__(self, root, observe=True):
         self.root = root
@@ -245,7 +257,9 @@ class CompanionApp:
                 if event.get('mic_error'):
                     self.voice.set('마이크 오류 '+str(event['mic_error'])+' · G0로 새 녹음을 시작해 주세요.')
             else:
-                self.connection.set('ADV 재연결 대기');self.voice.set('ADV 전원과 Windows Bluetooth 페어링을 확인해 주세요.')
+                self.connection.set('수신기 중지 중' if self.stop_started else 'ADV 재연결 대기')
+                self.firmware.set('ADV 연결 후 기기 상태 화면 지원 여부를 확인합니다.')
+                if not self.stop_started:self.voice.set('ADV 전원과 Windows Bluetooth 페어링을 확인해 주세요.')
         elif kind=='model':
             self.voice.set('한국어 모델을 불러오는 중…' if state=='loading' else '모델 준비 완료 · ADV에서 G0를 눌러 녹음하세요.')
         elif kind=='recording':
@@ -303,7 +317,11 @@ class CompanionApp:
                 if self.stop_file:self.stop_file.unlink(missing_ok=True)
         if self.child and self.stop_started and time.monotonic()-self.stop_started>20:
             # Only our child is stopped, never an unrelated CLI receiver.
-            self.child.terminate();self.stop_started=time.monotonic()
+            try:
+                terminate_receiver(self.child)
+            except (OSError, subprocess.TimeoutExpired):
+                self.voice.set('수신기 종료가 지연되고 있습니다. 다시 시도합니다.')
+            self.stop_started=time.monotonic()
         if self.closing.is_set() and self.child is None and self.monitor_done.is_set():
             if self.tray:self.tray.stop()
             self.root.destroy();return

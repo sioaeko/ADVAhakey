@@ -17,6 +17,17 @@ from test_voice import frame
 
 
 class StatusTests(unittest.TestCase):
+    def test_timeout_termination_is_scoped_to_owned_process_tree(self):
+        from companion_app import terminate_receiver
+        from unittest.mock import Mock
+        child=Mock(pid=123456);child.poll.return_value=None
+        with patch('companion_app.os.name','nt'),patch('companion_app.subprocess.run') as run:
+            terminate_receiver(child)
+            self.assertEqual(run.call_args.args[0],['taskkill.exe','/PID','123456','/T','/F'])
+        child.poll.return_value=0
+        with patch('companion_app.subprocess.run') as run:
+            terminate_receiver(child);run.assert_not_called()
+
     def test_managed_receiver_saves_only_complete_audio_and_stops(self):
         import voice_companion
         for final in (3,4):
